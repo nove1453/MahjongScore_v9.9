@@ -172,133 +172,197 @@
             if (!viewingRecord) return;
             const h = viewingRecord;
             const roundCount = h.players[0].scores.length;
+            const pCount = h.players.length;
             const dateStr = new Date(h.date).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' });
-            
-            const stats = calcPlayerStats(h);
-            const summary = stats.map(p => {
-                const ranks = [];
-                for(let i=0; i<roundCount; i++) {
-                    const rScores = h.players.map(pl => ({n:pl.name, s:parseFloat(pl.scores[i]) || 0}));
-                    rScores.sort((a,b) => b.s - a.s);
-                    ranks.push(rScores.findIndex(x => x.n === p.name) + 1);
-                }
-                return { name: p.name, totalPt: p.scoreTotal + getChipPoints(p.chip, h.rate, h.chipRate), netIncome: p.income, ranks, scores: p.scores };
-            });
 
+            const localStats = calcPlayerStats(h);
+            const summary = localStats.map(p => {
+                const ranks = [];
+                for (let i = 0; i < roundCount; i++) {
+                    const rs = h.players.map(pl => ({ n: pl.name, s: parseFloat(pl.scores[i]) || 0 }));
+                    rs.sort((a, b) => b.s - a.s);
+                    ranks.push(rs.findIndex(x => x.n === p.name) + 1);
+                }
+                return { name: p.name, totalPt: p.scoreTotal + getChipPoints(p.chip, h.rate, h.chipRate), netIncome: p.income, ranks };
+            });
             summary.sort((a, b) => b.totalPt - a.totalPt);
 
-            const newWindow = window.open("", "_blank");
-            if (!newWindow) return;
+            // ── Canvas layout constants ──
+            const W = 430, PAD = 14, IW = W - PAD * 2;
+            const HEADER_H = 88, RANK_H = 86, ROW_H = 26, THEAD_H = 30, FOOTER_H = 34;
+            const totalH = PAD * 2 + HEADER_H + 10 + summary.length * RANK_H + 14
+                         + 18 + THEAD_H + roundCount * ROW_H + ROW_H + ROW_H + 6 + 18 + FOOTER_H;
 
-            const headerHtml = 
-                '<div class="header">' +
-                    '<div class="flex justify-between items-center px-4 opacity-70">' +
-                        '<span class="text-3xl font-black italic">中</span>' +
-                        '<span class="text-3xl font-black italic">發</span>' +
-                    '</div>' +
-                    '<div class="bg-white/20 inline-block px-4 py-1 rounded-full text-xs font-bold mb-1">' + dateStr + ' セット</div>' +
-                    '<h1 class="text-xl font-black">' + roundCount + '半荘 / 4人打ち</h1>' +
-                '</div>';
+            const scale = 3;
+            const canvas = document.createElement('canvas');
+            canvas.width = W * scale;
+            canvas.height = totalH * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
 
-            const rankItemsHtml = summary.map((s, idx) => {
-                const rankClass = 'rank-' + (idx + 1);
-                const icon = idx === 0 ? '🏆' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '👤';
-                const incomeStr = (s.netIncome >= 0 ? '+' : '') + Math.round(s.netIncome).toLocaleString();
-                const incomeColor = s.netIncome >= 0 ? 'text-slate-800' : 'text-rose-600';
-                const comment = getOneLiner(s.ranks);
-                const ptStr = (s.totalPt >= 0 ? '+' : '') + s.totalPt.toFixed(1);
-                const ptColor = s.totalPt >= 0 ? 'text-blue-500' : 'text-rose-400';
+            // ── Helpers ──
+            const rr = (x, y, w, h, r, fill, sc, sw) => {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+                ctx.arcTo(x + w, y, x + w, y + r, r); ctx.lineTo(x + w, y + h - r);
+                ctx.arcTo(x + w, y + h, x + w - r, y + h, r); ctx.lineTo(x + r, y + h);
+                ctx.arcTo(x, y + h, x, y + h - r, r); ctx.lineTo(x, y + r);
+                ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+                if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+                if (sc) { ctx.strokeStyle = sc; ctx.lineWidth = sw || 1.5; ctx.stroke(); }
+            };
+            const rrTop = (x, y, w, h, r, fill) => {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+                ctx.arcTo(x + w, y, x + w, y + r, r); ctx.lineTo(x + w, y + h);
+                ctx.lineTo(x, y + h); ctx.lineTo(x, y + r);
+                ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+                ctx.fillStyle = fill; ctx.fill();
+            };
+            const rrBottom = (x, y, w, h, r, fill) => {
+                ctx.beginPath();
+                ctx.moveTo(x, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + h - r);
+                ctx.arcTo(x + w, y + h, x + w - r, y + h, r); ctx.lineTo(x + r, y + h);
+                ctx.arcTo(x, y + h, x, y + h - r, r); ctx.lineTo(x, y); ctx.closePath();
+                ctx.fillStyle = fill; ctx.fill();
+            };
+            const T = (text, x, y, { sz = 12, w = 'normal', c = '#1e293b', a = 'left', mw } = {}) => {
+                ctx.font = `${w} ${sz}px -apple-system,"Hiragino Sans","Yu Gothic",sans-serif`;
+                ctx.fillStyle = c; ctx.textAlign = a; ctx.textBaseline = 'middle';
+                mw ? ctx.fillText(text, x, y, mw) : ctx.fillText(text, x, y);
+            };
+            const E = (emoji, x, y, sz = 24) => {
+                ctx.font = `${sz}px -apple-system,"Apple Color Emoji",serif`;
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                ctx.fillText(emoji, x, y);
+            };
 
-                return '<div class="rank-item ' + rankClass + '">' +
-                    '<div class="flex-shrink-0 relative">' +
-                        '<div class="avatar flex items-center justify-center font-black text-2xl text-slate-400">' + icon + '</div>' +
-                        '<div class="absolute -top-2 -left-2 bg-slate-900 text-white w-7 h-7 rounded-full flex items-center justify-center font-black border-2 border-white text-sm">' +
-                            (idx + 1) + '<span class="text-[8px] ml-0.5">位</span>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="flex-1 min-w-0">' +
-                        '<div class="flex items-center">' +
-                            '<span class="font-black text-lg truncate">' + s.name + '</span>' +
-                        '</div>' +
-                        '<div class="bg-white/60 inline-block px-3 py-0.5 rounded-full text-[10px] font-bold text-slate-600 mt-1">' +
-                            '👑 ' + comment +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="text-right">' +
-                        '<div class="font-black text-xl italic ' + incomeColor + '">' + incomeStr +
-                            '<span class="text-xs font-normal ml-0.5 not-italic">円</span>' +
-                        '</div>' +
-                        '<div class="font-bold text-sm italic ' + ptColor + '">' + ptStr +
-                            '<span class="text-[10px] font-normal ml-0.5 not-italic">pt</span>' +
-                        '</div>' +
-                    '</div>' +
-                '</div>';
-            }).join('');
+            // ── Background & card ──
+            ctx.fillStyle = '#e4e8ed'; ctx.fillRect(0, 0, W, totalH);
+            rr(PAD, PAD, IW, totalH - PAD * 2, 22, '#ffffff');
 
-            const tableHeader = '<thead><tr class="bg-emerald-50 text-emerald-800 font-black"><th class="py-2 border-b border-white">半荘</th>' +
-                h.players.map(p => '<th class="py-2 border-b border-white">' + p.name + '</th>').join('') +
-                '</tr></thead>';
+            let cy = PAD;
 
-            const scoreRowsHtml = Array.from({ length: roundCount }).map((_, ri) => {
-                const cells = h.players.map(p => {
-                    const val = parseFloat(p.scores[ri]) || 0;
-                    const colorClass = val > 0 ? 'text-blue-500' : val < 0 ? 'text-rose-500' : 'text-slate-400';
-                    const sign = val > 0 ? '+' : '';
-                    return '<td class="py-2 font-bold ' + colorClass + '">' + sign + val + '</td>';
-                }).join('');
-                const rowClass = ri % 2 === 0 ? 'bg-white' : 'bg-slate-50/50';
-                return '<tr class="' + rowClass + '"><td class="py-2 font-black text-slate-300 border-r border-slate-100">' + (ri + 1) + '半荘</td>' + cells + '</tr>';
-            }).join('');
+            // ── HEADER ──
+            rrTop(PAD, cy, IW, HEADER_H, 22, '#14532d');
+            T('ScoreLog Pro AI', W / 2, cy + 15, { sz: 9, w: '700', c: 'rgba(255,255,255,0.4)', a: 'center' });
+            T(dateStr, W / 2, cy + 35, { sz: 12, c: 'rgba(255,255,255,0.75)', a: 'center' });
+            T(roundCount + '半荘　/ ' + pCount + '人打ち', W / 2, cy + 62, { sz: 20, w: '900', c: '#ffffff', a: 'center' });
+            cy += HEADER_H + 10;
 
-            const chipRowHtml = '<tr style="background:#fffbeb;border-top:2px solid #fcd34d;">' +
-                '<td class="py-2 font-black border-r border-slate-100" style="color:#d97706;">チップ</td>' +
-                h.players.map(p => {
-                    const chip = parseFloat(p.chip) || 0;
-                    const col = chip > 0 ? '#d97706' : chip < 0 ? '#dc2626' : '#94a3b8';
-                    return '<td class="py-2 font-bold" style="color:' + col + ';">' + (chip > 0 ? '+' : '') + chip + '枚</td>';
-                }).join('') +
-            '</tr>';
+            // ── RANK ITEMS ──
+            const rankBgs = ['#fef9c3', '#f1f5f9', '#fff7ed', '#eff6ff'];
+            const rankBrds = ['#eab308', '#cbd5e1', '#fed7aa', '#bfdbfe'];
+            const rankEmoji = ['🏆', '🥈', '🥉', '👤'];
 
-            const totalRowHtml = '<tr style="background:#ecfdf5;border-top:2px solid #6ee7b7;">' +
-                '<td class="py-3 font-black border-r border-slate-100" style="color:#059669;">合計</td>' +
-                h.players.map(p => {
-                    const ps = summary.find(x => x.name === p.name);
-                    const totalPt = ps ? ps.totalPt : 0;
-                    const sign = totalPt >= 0 ? '+' : '';
-                    const col = totalPt > 0 ? '#2563eb' : totalPt < 0 ? '#dc2626' : '#94a3b8';
-                    return '<td class="py-3 font-black" style="color:' + col + ';">' + sign + totalPt.toFixed(1) + 'pt</td>';
-                }).join('') +
-            '</tr>';
+            summary.forEach((s, idx) => {
+                const ih = RANK_H - 10;
+                rr(PAD, cy, IW, ih, 14, rankBgs[idx] || '#f8fafc', rankBrds[idx] || '#e2e8f0', 2);
 
-            const fullHtml = 
-                '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Mahjong Report</title>' +
-                '<script src="https://cdn.tailwindcss.com"></scr' + 'ipt>' +
-                '<style>' +
-                    '@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap");' +
-                    'body { font-family: "Noto Sans JP", sans-serif; background: #f0f2f5; padding: 20px; display: flex; justify-content: center; }' +
-                    '.report-card { width: 450px; background: white; border-radius: 32px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.1); border: 8px solid #14532d; }' +
-                    '.header { background: #14532d; color: white; padding: 20px; text-align: center; position: relative; }' +
-                    '.header::after { content: ""; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); border-left: 15px solid transparent; border-right: 15px solid transparent; border-top: 15px solid #14532d; }' +
-                    '.rank-item { display: flex; align-items: center; padding: 15px 20px; margin: 10px; border-radius: 20px; position: relative; }' +
-                    '.rank-1 { background: linear-gradient(135deg, #fef9c3 0%, #fde047 100%); border: 2px solid #eab308; }' +
-                    '.rank-2 { background: #f1f5f9; border: 2px solid #cbd5e1; }' +
-                    '.rank-3 { background: #fff7ed; border: 2px solid #fed7aa; }' +
-                    '.rank-4 { background: #eff6ff; border: 2px solid #bfdbfe; }' +
-                    '.avatar { width: 60px; height: 60px; border-radius: 50%; background: #eee; margin-right: 15px; border: 3px solid white; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }' +
+                // rank badge
+                rr(PAD + 8, cy + 6, 22, 22, 11, '#1e293b');
+                T((idx + 1) + '位', PAD + 19, cy + 17, { sz: 7, w: '900', c: '#fff', a: 'center' });
+
+                // emoji
+                E(rankEmoji[idx] || '👤', PAD + 52, cy + ih / 2, 26);
+
+                // name
+                T(s.name, PAD + 76, cy + 19, { sz: 14, w: '900', c: '#1e293b', mw: IW - 190 });
+
+                // comment
+                const cmt = '👑 ' + getOneLiner(s.ranks);
+                ctx.font = '700 9px -apple-system,sans-serif';
+                const cw = Math.min(ctx.measureText(cmt).width + 14, IW - 200);
+                rr(PAD + 74, cy + 36, cw, 16, 8, 'rgba(255,255,255,0.8)');
+                T(cmt, PAD + 81, cy + 44, { sz: 9, w: '700', c: '#475569', mw: cw - 10 });
+
+                // income
+                const incStr = (s.netIncome >= 0 ? '+' : '') + Math.round(s.netIncome).toLocaleString() + '円';
+                T(incStr, W - PAD - 8, cy + 22, { sz: 16, w: '900', c: s.netIncome >= 0 ? '#1e293b' : '#dc2626', a: 'right' });
+
+                // pt
+                const ptStr = (s.totalPt >= 0 ? '+' : '') + s.totalPt.toFixed(1) + 'pt';
+                T(ptStr, W - PAD - 8, cy + 44, { sz: 11, w: '700', c: s.totalPt >= 0 ? '#2563eb' : '#ef4444', a: 'right' });
+
+                cy += RANK_H;
+            });
+
+            cy += 14;
+
+            // ── TABLE ──
+            T('各半荘の結果 (pt)', W / 2, cy + 9, { sz: 9, w: '700', c: '#94a3b8', a: 'center' });
+            cy += 18;
+
+            const C0 = 50, CW = (IW - C0) / pCount;
+
+            // table header
+            ctx.fillStyle = '#dcfce7'; ctx.fillRect(PAD, cy, IW, THEAD_H);
+            ctx.fillStyle = '#86efac'; ctx.fillRect(PAD, cy + THEAD_H - 1, IW, 1);
+            T('半荘', PAD + C0 / 2, cy + THEAD_H / 2, { sz: 9, w: '900', c: '#166534', a: 'center' });
+            h.players.forEach((p, pi) => {
+                T(p.name, PAD + C0 + CW * pi + CW / 2, cy + THEAD_H / 2, { sz: 9, w: '900', c: '#166534', a: 'center', mw: CW - 4 });
+            });
+            cy += THEAD_H;
+
+            // score rows
+            for (let ri = 0; ri < roundCount; ri++) {
+                if (ri % 2 === 1) { ctx.fillStyle = '#f8fafc'; ctx.fillRect(PAD, cy + ri * ROW_H, IW, ROW_H); }
+                ctx.fillStyle = '#e2e8f0'; ctx.fillRect(PAD, cy + ri * ROW_H, IW, 1);
+                T((ri + 1) + '局', PAD + C0 / 2, cy + ri * ROW_H + ROW_H / 2, { sz: 8, w: '900', c: '#cbd5e1', a: 'center' });
+                h.players.forEach((p, pi) => {
+                    const v = parseFloat(p.scores[ri]) || 0;
+                    T((v > 0 ? '+' : '') + v, PAD + C0 + CW * pi + CW / 2, cy + ri * ROW_H + ROW_H / 2,
+                      { sz: 10, w: '700', c: v > 0 ? '#3b82f6' : v < 0 ? '#ef4444' : '#94a3b8', a: 'center' });
+                });
+            }
+            cy += roundCount * ROW_H;
+
+            // chip row
+            ctx.fillStyle = '#fffbeb'; ctx.fillRect(PAD, cy, IW, ROW_H);
+            ctx.fillStyle = '#fbbf24'; ctx.fillRect(PAD, cy, IW, 2);
+            T('チップ', PAD + C0 / 2, cy + ROW_H / 2, { sz: 8, w: '900', c: '#d97706', a: 'center' });
+            h.players.forEach((p, pi) => {
+                const chip = parseFloat(p.chip) || 0;
+                T((chip > 0 ? '+' : '') + chip + '枚', PAD + C0 + CW * pi + CW / 2, cy + ROW_H / 2,
+                  { sz: 10, w: '700', c: chip > 0 ? '#d97706' : chip < 0 ? '#dc2626' : '#94a3b8', a: 'center' });
+            });
+            cy += ROW_H;
+
+            // total row
+            ctx.fillStyle = '#ecfdf5'; ctx.fillRect(PAD, cy, IW, ROW_H + 6);
+            ctx.fillStyle = '#34d399'; ctx.fillRect(PAD, cy, IW, 2);
+            T('合計', PAD + C0 / 2, cy + (ROW_H + 6) / 2, { sz: 8, w: '900', c: '#059669', a: 'center' });
+            h.players.forEach((p, pi) => {
+                const ps = summary.find(x => x.name === p.name);
+                const tp = ps ? ps.totalPt : 0;
+                T((tp >= 0 ? '+' : '') + tp.toFixed(1), PAD + C0 + CW * pi + CW / 2, cy + (ROW_H + 6) / 2,
+                  { sz: 12, w: '900', c: tp > 0 ? '#2563eb' : tp < 0 ? '#dc2626' : '#94a3b8', a: 'center' });
+            });
+            cy += ROW_H + 6 + 18;
+
+            // ── FOOTER ──
+            rrBottom(PAD, cy, IW, FOOTER_H, 22, '#1e293b');
+            T('Generated by ScoreLog Pro AI', W / 2, cy + FOOTER_H / 2, { sz: 9, w: '700', c: 'rgba(255,255,255,0.4)', a: 'center' });
+
+            // ── Export as <img> for Safari long-press save ──
+            const dataUrl = canvas.toDataURL('image/png');
+            const win = window.open('', '_blank');
+            if (!win) { alert('ポップアップがブロックされました。ブラウザの設定を確認してください。'); return; }
+            win.document.write(
+                '<!DOCTYPE html><html><head>' +
+                '<meta charset="UTF-8">' +
+                '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">' +
+                '<title>成績レポート</title>' +
+                '<style>*{margin:0;padding:0;box-sizing:border-box;}' +
+                'body{background:#dde1e7;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 14px;gap:14px;font-family:-apple-system,sans-serif;}' +
+                '.hint{background:#fff;border-radius:14px;padding:12px 18px;font-size:14px;font-weight:700;color:#475569;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.08);}' +
+                'img{max-width:100%;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,0.14);display:block;}' +
                 '</style></head><body>' +
-                '<div class="report-card">' + headerHtml +
-                    '<div class="p-2 pt-6">' + rankItemsHtml + '</div>' +
-                    '<div class="p-6">' +
-                        '<h3 class="text-center font-black text-sm mb-4 text-slate-400">各半荘の結果 (pt)</h3>' +
-                        '<div class="bg-slate-50 rounded-2xl overflow-hidden border border-slate-100">' +
-                            '<table class="w-full text-center text-[11px]">' +
-                                tableHeader + '<tbody>' + scoreRowsHtml + chipRowHtml + totalRowHtml + '</tbody>' +
-                            '</table></div></div>' +
-                    '<div class="bg-slate-900 text-white py-4 text-center text-[10px] font-black italic tracking-widest uppercase opacity-80">Generated by ScoreLog Pro AI</div>' +
-                '</div></body></html>';
-
-            newWindow.document.write(fullHtml);
-            newWindow.document.close();
+                '<div class="hint">📸 画像を長押しして保存できます</div>' +
+                '<img src="' + dataUrl + '" />' +
+                '</body></html>'
+            );
+            win.document.close();
         };
 
         const stats = useMemo(() => {
@@ -720,9 +784,11 @@
 
                 {showNewSetModal && (
                     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-end justify-center animate-in">
-                        <div className="bg-white w-full max-w-[450px] rounded-t-[40px] p-8">
-                            <h3 className="text-2xl font-black italic mb-6">対局セットアップ</h3>
-                            <div className="space-y-6">
+                        <div className="bg-white w-full max-w-[450px] rounded-t-[40px] flex flex-col" style={{maxHeight:'88vh'}}>
+                            <div className="px-8 pt-8 pb-4 flex-shrink-0">
+                                <h3 className="text-2xl font-black italic">対局セットアップ</h3>
+                            </div>
+                            <div className="overflow-y-auto flex-1 px-8 pb-8 space-y-6">
                                 <div className="grid grid-cols-2 gap-2">
                                     {db.members.map(m => (
                                         <button key={m.id} onClick={() => setModalSetup({ ...modalSetup, selectedIds: modalSetup.selectedIds.includes(m.id) ? modalSetup.selectedIds.filter(id => id !== m.id) : [...modalSetup.selectedIds, m.id].slice(-4) })}
@@ -740,7 +806,7 @@
                                     setDb({...db, currentSet: { date: new Date().toISOString(), rate: modalSetup.rate, chipRate: modalSetup.chipRate, players: m.map(x => ({name: x.name, scores:[0], chip:0, fee:0})) }});
                                     setShowNewSetModal(false); setActiveTab('input');
                                 }} className="w-full py-5 bg-emerald-500 text-white rounded-[24px] font-black text-lg disabled:opacity-30">対局開始</button>
-                                <button onClick={() => setShowNewSetModal(false)} className="w-full text-slate-400 font-bold">キャンセル</button>
+                                <button onClick={() => setShowNewSetModal(false)} className="w-full text-slate-400 font-bold pb-2">キャンセル</button>
                             </div>
                         </div>
                     </div>
