@@ -3,13 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
-    <title>ScoreLog Pro AI - V9.6</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <title>ScoreLog Pro AI - V9.6.1</title>
+    <script>
+        window.scorelogShowBootError = function(message) {
+            const render = function() {
+                const root = document.getElementById('root');
+                if (!root) return;
+                root.innerHTML = '<div class="boot-error"><div class="boot-error-card"><h1>ScoreLogを起動できませんでした</h1><p>' + message + '</p><button type="button" onclick="location.reload()">再読み込み</button></div></div>';
+            };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', render, { once: true });
+            else render();
+        };
+        window.scorelogDependencyError = function(name) {
+            window.scorelogShowBootError(name + ' の読み込みに失敗しました。通信環境を確認して再読み込みしてください。');
+        };
+    </script>
+    <script src="https://cdn.tailwindcss.com/3.4.17" onerror="scorelogDependencyError('Tailwind CSS')"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" onerror="scorelogDependencyError('Lucide')"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" onerror="scorelogDependencyError('Chart.js')"></script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" onerror="scorelogDependencyError('React')"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" onerror="scorelogDependencyError('ReactDOM')"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" onerror="scorelogDependencyError('Babel')"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+JP:wght@400;700;900&display=swap');
         :root { --app-max-width: 450px; }
@@ -24,14 +38,81 @@
         input[type="date"] { background: #f1f5f9; border-radius: 8px; padding: 4px 8px; font-size: 11px; font-weight: bold; color: #475569; border: none; }
         .animate-in { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .boot-error { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; background: #f8fafc; color: #0f172a; }
+        .boot-error-card { width: min(100%, 420px); background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 24px; box-shadow: 0 16px 40px rgba(15,23,42,.08); }
+        .boot-error-card h1 { margin: 0 0 8px; font-size: 20px; font-weight: 900; }
+        .boot-error-card p { margin: 0 0 16px; color: #64748b; font-size: 14px; line-height: 1.7; }
+        .boot-error-card button { width: 100%; border: 0; border-radius: 14px; background: #10b981; color: #fff; font-weight: 900; padding: 14px 16px; }
     </style>
 </head>
 <body class="text-slate-900">
     <div id="root"></div>
+    <noscript>
+        <div class="boot-error">
+            <div class="boot-error-card">
+                <h1>JavaScriptを有効にしてください</h1>
+                <p>ScoreLogを表示するにはブラウザのJavaScriptが必要です。</p>
+            </div>
+        </div>
+    </noscript>
 
 <script type="text/babel">
+    if (!window.React || !window.ReactDOM) {
+        window.scorelogShowBootError('Reactの読み込みが完了していません。通信環境を確認して再読み込みしてください。');
+        throw new Error('React dependencies are missing.');
+    }
+
     const { useState, useEffect, useMemo, useRef } = React;
     const STORAGE_KEY = 'scorelog_v96_stable';
+    const STORAGE_BACKUP_KEY = `${STORAGE_KEY}_broken_backup`;
+
+    const createInitialDb = () => ({
+        members: [{ id: 1, name: 'プレイヤー1' }, { id: 2, name: 'プレイヤー2' }, { id: 3, name: 'プレイヤー3' }, { id: 4, name: 'プレイヤー4' }],
+        history: [], currentSet: null
+    });
+
+    const normalizeDb = (value) => {
+        if (!value || typeof value !== 'object') return createInitialDb();
+        const initial = createInitialDb();
+        return {
+            ...initial,
+            ...value,
+            members: Array.isArray(value.members) && value.members.length ? value.members : initial.members,
+            history: Array.isArray(value.history) ? value.history : [],
+            currentSet: value.currentSet || null
+        };
+    };
+
+    const loadDb = () => {
+        let saved = null;
+        try {
+            saved = localStorage.getItem(STORAGE_KEY);
+        } catch (error) {
+            console.error('ScoreLog: localStorage is not available.', error);
+        }
+        if (!saved) return createInitialDb();
+        try {
+            return normalizeDb(JSON.parse(saved));
+        } catch (error) {
+            console.error('ScoreLog: saved data could not be loaded.', error);
+            try {
+                localStorage.setItem(STORAGE_BACKUP_KEY, saved);
+                localStorage.removeItem(STORAGE_KEY);
+            } catch (storageError) {
+                console.error('ScoreLog: failed to back up broken saved data.', storageError);
+            }
+            return createInitialDb();
+        }
+    };
+
+    const cloneDb = (value) => {
+        if (window.structuredClone) return window.structuredClone(value);
+        return JSON.parse(JSON.stringify(value));
+    };
+
+    const showBootError = (message) => {
+        window.scorelogShowBootError(message);
+    };
 
     const Icon = ({ name, className = "w-5 h-5" }) => {
         const iconRef = useRef(null);
@@ -39,7 +120,13 @@
             if (window.lucide && iconRef.current) {
                 iconRef.current.innerHTML = ''; 
                 const iconElement = document.createElement('i');
-                iconElement.setAttribute('data-lucide', name.toLowerCase().replace(/([a-z0-9])([A-Z])/g, '$1-$2'));
+                iconElement.setAttribute(
+                    'data-lucide',
+                    name
+                        .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+                        .replace(/([a-z])([0-9])/g, '$1-$2')
+                        .toLowerCase()
+                );
                 iconElement.className = className;
                 iconRef.current.appendChild(iconElement);
                 window.lucide.createIcons({ root: iconRef.current });
@@ -68,13 +155,7 @@
     };
 
     const App = () => {
-        const [db, setDb] = useState(() => {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            return saved ? JSON.parse(saved) : {
-                members: [{ id: 1, name: 'プレイヤー1' }, { id: 2, name: 'プレイヤー2' }, { id: 3, name: 'プレイヤー3' }, { id: 4, name: 'プレイヤー4' }],
-                history: [], currentSet: null
-            };
-        });
+        const [db, setDb] = useState(loadDb);
 
         const [activeTab, setActiveTab] = useState('welcome');
         const [activeField, setActiveField] = useState(null); 
@@ -98,7 +179,11 @@
         const trendChartInstance = useRef(null);
 
         useEffect(() => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeDb(db)));
+            } catch (error) {
+                console.error('ScoreLog: failed to save data.', error);
+            }
             if (db.currentSet && activeTab === 'welcome') setActiveTab('input');
         }, [db, activeTab]);
 
@@ -118,7 +203,7 @@
 
         // 安全な計算ヘルパー
         const calcPlayerStats = (source) => {
-            if (!source) return [];
+            if (!source || !Array.isArray(source.players)) return [];
             return source.players.map(p => {
                 const scoreTotal = (p.scores || []).reduce((a, b) => a + (parseFloat(b) || 0), 0);
                 const rate = parseFloat(source.rate) || 0;
@@ -426,6 +511,7 @@
 
         useEffect(() => {
             if (activeTab === 'stats' && chartRef.current) {
+                if (!window.Chart) return;
                 if (trendChartInstance.current) trendChartInstance.current.destroy();
                 const allNames = Object.keys(stats);
                 const targetNames = statSelectedNames.length > 0 ? statSelectedNames : sortedStatNames.slice(0, 3);
@@ -435,7 +521,7 @@
                     const ps = stats[name];
                     const dataPoints = [0]; 
                     dateLabels.forEach(date => {
-                        const daily = ps.history.filter(h => h.date === date);
+                        const daily = ps ? ps.history.filter(h => h.date === date) : [];
                         daily.forEach(m => {
                             if (statType === 'income') running += m.income;
                             else if (statType === 'scoreWithChip') running += m.scoreWithChip;
@@ -444,7 +530,7 @@
                     });
                     return { label: name, data: dataPoints, borderColor: colors[allNames.indexOf(name) % colors.length], borderWidth: 3, tension: 0.2, pointRadius: 3, pointBackgroundColor: '#fff' };
                 });
-                trendChartInstance.current = new Chart(chartRef.current.getContext('2d'), {
+                trendChartInstance.current = new window.Chart(chartRef.current.getContext('2d'), {
                     type: 'line', data: { labels: ['', ...dateLabels], datasets },
                     options: { plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } }, scales: { x: { ticks: { font: { size: 8 }, maxRotation: 45 }, grid: { display: false } }, y: { grid: { color: '#f1f5f9' } } }, maintainAspectRatio: false }
                 });
@@ -454,7 +540,7 @@
         const applyValue = () => {
             if (!activeField) return;
             const val = parseFloat(tempValue) || 0;
-            const newDb = JSON.parse(JSON.stringify(db));
+            const newDb = cloneDb(db);
             
             let targetSet;
             if (activeTab === 'input' && !viewingRecord) {
@@ -585,12 +671,12 @@
                             </div>
                             {!viewingRecord && (
                                 <div className="p-5 space-y-4">
-                                    <button onClick={() => { const n = JSON.parse(JSON.stringify(db)); n.currentSet.players.forEach(p => p.scores.push(0)); setDb(n); }} className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-slate-500 font-bold flex items-center justify-center gap-2">
+                                    <button onClick={() => { const n = cloneDb(db); n.currentSet.players.forEach(p => p.scores.push(0)); setDb(n); }} className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-slate-500 font-bold flex items-center justify-center gap-2">
                                         <Icon name="Plus" className="w-4 h-4" /> 半荘追加
                                     </button>
                                     <button onClick={() => { 
                                         const stats = calcPlayerStats(db.currentSet);
-                                        const r = JSON.parse(JSON.stringify(db.currentSet)); 
+                                        const r = cloneDb(db.currentSet); 
                                         r.players = stats.map(p => ({ 
                                             name: p.name, scores: p.scores, chip: p.chip, fee: p.fee, settlement: p.income, scoreTotal: p.scoreTotal
                                         })); 
@@ -771,7 +857,7 @@
                                     {isEditingBackup && (
                                         <div className="space-y-3">
                                             <textarea value={backupText} onChange={(e) => setBackupText(e.target.value)} className="w-full h-48 p-4 bg-slate-50 border rounded-2xl font-mono text-[10px]" placeholder="JSONデータを貼り付け" />
-                                            <button onClick={() => { try { setDb(JSON.parse(backupText)); setIsEditingBackup(false); } catch(e) { alert("Invalid JSON"); } }} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black">適用</button>
+                                            <button onClick={() => { try { setDb(normalizeDb(JSON.parse(backupText))); setIsEditingBackup(false); } catch(e) { alert("Invalid JSON"); } }} className="w-full py-4 bg-emerald-500 text-white rounded-2xl font-black">適用</button>
                                         </div>
                                     )}
                                 </div>
@@ -813,8 +899,13 @@
         );
     };
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    try {
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    } catch (error) {
+        console.error('ScoreLog: failed to render app.', error);
+        showBootError('画面の描画中にエラーが発生しました。保存データが壊れている可能性があります。再読み込み後も直らない場合はバックアップデータから復元してください。');
+    }
 </script>
 </body>
 </html>
